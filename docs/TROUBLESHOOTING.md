@@ -148,3 +148,102 @@ Only frontend or API gateway is publicly exposed.
 Internal service communication happens over private networking (Docker bridge, Kubernetes Service, VPC networking).
 
 Understanding this distinction prevents accidental public exposure of internal services and improves security architecture.
+
+### ❌ Frontend Cannot Reach Backend When Using Docker Compose
+
+Tool: Docker / Docker Compose / Nginx
+
+**What I Was Trying To Do:**
+
+I containerized both FastAPI backend and React frontend.
+When running containers separately using `docker run`, the frontend successfully connected to the backend using `http://localhost:8000`.
+
+After switching to Docker Compose and updating the frontend API URL to `http://backend:8000`, the frontend failed to fetch data from the backend.
+
+---
+
+**Error / Symptom:**
+
+Browser console error:
+
+Cross-Origin Request Blocked: The Same Origin Policy disallows reading the remote resource at http://backend:8000/api/message.
+Reason: CORS request did not succeed.
+Status code: (null)
+
+Frontend showed:
+TypeError: NetworkError when attempting to fetch resource
+
+Backend logs showed no incoming API request.
+
+---
+
+**Root Cause:**
+
+The frontend application runs in the user's browser, not inside the Docker container.
+
+`backend` is a Docker internal DNS name that is only resolvable inside the Docker network.
+
+When the browser tried to call:
+http://backend:8000
+
+It failed because:
+
+- The browser runs on the host machine
+- The host machine cannot resolve Docker internal service names
+- The request failed at DNS level
+- Therefore status code was null
+- Backend never received the request
+
+This is not a CORS configuration problem.
+It is a networking scope problem.
+
+---
+
+**How I Debugged:**
+
+1. Checked browser DevTools → Network tab
+2. Observed request failing with status (null)
+3. Verified backend container logs (no incoming request)
+4. Tested curl inside frontend container:
+   curl http://backend:8000/health
+   → Worked successfully
+5. Confirmed that Docker internal DNS resolution works only inside containers
+6. Realized browser cannot access Docker service names
+
+---
+
+**Final Fix:**
+
+Implemented Nginx reverse proxy inside frontend container.
+
+Steps:
+
+1. Created `nginx.conf`
+2. Configured:
+
+   location /api/ {
+       proxy_pass http://backend:8000/api/;
+   }
+
+3. Modified frontend Dockerfile to copy custom nginx.conf
+4. Changed frontend API call from:
+   http://backend:8000/api/message
+   to:
+   /api/message
+
+Now flow is:
+
+Browser → localhost:3000 → Nginx → backend container
+
+No direct browser-to-backend call.
+No cross-origin issue.
+
+---
+**Production Lesson:**
+
+- Browser networking and container networking are different layers.
+- Docker service names are not accessible from the host machine.
+- A CORS error can actually be a DNS/network resolution issue.
+- Frontend applications should not directly depend on backend container hostnames.
+- Reverse proxy (Nginx) is the correct production architecture.
+- In real production systems, API traffic is routed via Load Balancer or reverse proxy, not direct container access.
