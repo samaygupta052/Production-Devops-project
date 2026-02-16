@@ -48,3 +48,103 @@ Then:
 - Enable branch protection rules in remote repository.
 - In shared environments, use `git revert` instead of `git reset --hard` to avoid rewriting history.
 - Production safety > convenience.
+
+❌ Frontend Worked Without Docker Network
+Tool: Docker
+
+What I Was Trying To Do:
+Run frontend and backend containers separately without creating a custom Docker network.
+
+Error / Symptom:
+There was no visible error. The application worked even though both containers were not attached to a user-defined Docker network.
+
+Root Cause:
+The frontend was calling the backend through the host machine using port mapping (-p).
+Docker published container ports to the host, allowing browser → host → container communication.
+
+This was not true container-to-container communication.
+
+How I Debugged:
+Checked running containers using docker ps
+Observed port mappings (8000:8000, 3000:80)
+Understood that browser was accessing host ports
+Realized no internal Docker DNS resolution was being used
+
+Final Fix:
+Created a user-defined Docker network:
+docker network create devops-network
+
+Ran both containers inside the same network and used container name:
+http://backend:8000
+
+Production Lesson:
+Port mapping is not service-to-service communication.
+In production systems (Docker Compose, Kubernetes), services communicate over internal networks, not through host ports.
+Relying on localhost creates fragile architecture and breaks scaling.
+
+🎯 Production Insight
+Right now your system works because:
+Browser → Host → Container
+
+In Kubernetes it becomes:
+Pod → Service → Pod
+
+Completely different model.
+
+❌ Backend Accessible Without Port Mapping (-p)
+Tool: Docker Networking
+
+What I Was Trying To Do:
+Run backend container inside a user-defined Docker network without exposing port 8000 to the host using -p, and check whether the frontend container could still access it.
+
+Error / Symptom:
+There was no error.
+Frontend was still able to communicate with backend even though backend container did not publish port 8000 to the host.
+
+However, accessing http://localhost:8000 from the browser failed.
+
+Root Cause:
+Docker containers inside the same user-defined network communicate using internal bridge networking.
+Docker provides internal DNS resolution.
+Containers resolve each other using container names.
+Communication happens via internal container IP and exposed container port.
+Port publishing (-p) is only required for host-to-container communication.
+
+So:
+Frontend → http://backend:8000 → Backend (internal Docker network)
+
+But:
+Browser → http://localhost:8000 → ❌ Fails
+Because port was not published to host.
+
+How I Debugged:
+Commands used:
+docker ps
+docker inspect backend
+docker network inspect devops-network
+
+Observed:
+Backend container had no published ports.
+Both containers were attached to devops-network.
+Frontend successfully resolved backend via Docker DNS.
+
+Tested:
+curl http://backend:8000/health inside frontend container → Success
+curl http://localhost:8000 on host → Failed
+
+Final Fix:
+No fix required. This behavior is correct and production-aligned.
+If host access is required:
+docker run -p 8000:8000 ...
+
+If only internal service communication is required, no port publishing is needed.
+
+Production Lesson:
+Port publishing is for host access, not container communication.
+
+In production systems:
+Backend services are typically internal-only.
+Only frontend or API gateway is publicly exposed.
+Internal service communication happens over private networking (Docker bridge, Kubernetes Service, VPC networking).
+
+Understanding this distinction prevents accidental public exposure of internal services and improves security architecture.
