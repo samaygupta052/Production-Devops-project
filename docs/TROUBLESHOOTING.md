@@ -662,3 +662,56 @@ Updated ingress backend port to correct service port (80).
 Production Lesson:
 Ingress must reference service port — not container port.
 Port mismatches are a common routing failure.
+
+
+❌ HPA Not Scaling (Missing CPU Request)
+Tool: Kubernetes HPA
+
+What I Was Trying To Do:
+Auto-scale backend deployment based on CPU usage.
+
+Error / Symptom:
+HPA showed no scaling activity.
+kubectl describe hpa showed CPU utilization error.
+
+Root Cause:
+Deployment missing CPU request.
+HPA calculates utilization as percentage of CPU request.
+
+How I Debugged:
+kubectl describe hpa backend-hpa -n devops
+kubectl get deployment backend -n devops -o yaml
+
+Observed missing cpu request in resources.
+
+Final Fix:
+Added CPU request to deployment.
+
+Production Lesson:
+HPA requires CPU requests to calculate scaling thresholds.
+Without it, scaling will not work.
+
+❌ HPA Metrics Showing Unknown
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Monitor HPA scaling.
+
+Error / Symptom:
+HPA showed CPU as <unknown>.
+
+Root Cause:
+metrics-server not running.
+
+How I Debugged:
+kubectl get pods -n kube-system
+kubectl get hpa -n devops
+
+Observed metrics-server missing.
+
+Final Fix:
+Enabled metrics-server.
+
+Production Lesson:
+Autoscaling depends on cluster metrics infrastructure.
+If metrics fail, scaling fails silently.
