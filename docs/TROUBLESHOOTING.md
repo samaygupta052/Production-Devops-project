@@ -715,3 +715,31 @@ Enabled metrics-server.
 Production Lesson:
 Autoscaling depends on cluster metrics infrastructure.
 If metrics fail, scaling fails silently.
+
+
+❌ Blue-Green Deployment Traffic Switch Failure
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Switch traffic from blue to green deployment.
+
+Error / Symptom:
+After switching service selector to green, application failed.
+
+Root Cause:
+Green deployment used broken image.
+Service routed traffic only to failing pods.
+
+How I Debugged:
+kubectl get pods -n devops
+kubectl describe pod <green-pod> -n devops
+kubectl get endpoints -n devops
+
+Observed green pods failing.
+
+Final Fix:
+Switched service selector back to blue.
+
+Production Lesson:
+Blue-green allows instant rollback without redeployment.
+Traffic control via service selectors is powerful but must be validated before switching.
