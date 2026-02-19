@@ -17,3 +17,7 @@ def memory_spike():
         data.append("consume-memory")
     return {"status": "memory consumed"}
 
+@router.get("/version")
+def version():
+    return {"version": "canary"}
+

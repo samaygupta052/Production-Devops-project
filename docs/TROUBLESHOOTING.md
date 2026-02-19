@@ -742,4 +742,32 @@ Switched service selector back to blue.
 
 Production Lesson:
 Blue-green allows instant rollback without redeployment.
-Traffic control via service selectors is powerful but must be validated before switching.
+Traffic control via service selectors is poweriful but must be validated before switching.
+
+
+❌ Canary Deployment Causing Partial Failures
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Release new backend version using canary deployment.
+
+Error / Symptom:
+Some API calls failed while others succeeded.
+
+Root Cause:
+Canary pods contained broken release.
+Service routed portion of traffic to failing pods.
+
+How I Debugged:
+kubectl get pods -n devops
+kubectl logs <canary-pod> -n devops
+kubectl get endpoints -n devops
+
+Identified failing canary pods.
+
+Final Fix:
+Scaled down canary deployment to 0 replicas.
+
+Production Lesson:
+Canary reduces blast radius but does not eliminate risk.
+Monitoring is critical before full rollout.
