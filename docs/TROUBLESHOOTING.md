@@ -247,3 +247,418 @@ No cross-origin issue.
 - Frontend applications should not directly depend on backend container hostnames.
 - Reverse proxy (Nginx) is the correct production architecture.
 - In real production systems, API traffic is routed via Load Balancer or reverse proxy, not direct container access.
+
+❌ ImagePullBackOff in Minikube
+Tool: Kubernetes (Minikube)
+
+What I Was Trying To Do:
+Deploy backend and frontend containers to Minikube using locally built Docker images (devops-backend:latest, devops-frontend:latest).
+
+Error / Symptom:
+Pods stuck in:
+
+ImagePullBackOff
+kubectl get pods -n devops
+Output:
+backend-xxxxx   0/1   ImagePullBackOff
+
+Root Cause:
+Minikube runs its own Docker daemon internally.
+The images were built in the host Docker daemon, not inside Minikube’s Docker environment.
+
+Therefore, Kubernetes could not find the images and tried pulling from a registry, which failed.
+
+How I Debugged:
+Checked pod status:
+kubectl get pods -n devops
+
+Described pod:
+kubectl describe pod <pod-name> -n devops
+
+Observed:
+Failed to pull image "devops-backend:latest"
+
+Checked minikube Docker environment:
+eval $(minikube docker-env)
+docker images
+
+Images were missing.
+
+Final Fix:
+Switched to Minikube Docker daemon:
+eval $(minikube docker-env)
+
+Rebuilt images:
+docker build -t devops-backend ./backend
+docker build -t devops-frontend ./frontend
+
+Re-applied deployment:
+kubectl delete pod <pod-name> -n devops
+
+Pods moved to Running state.
+
+Production Lesson:
+Kubernetes nodes must have access to container images.
+In production, this means pushing images to a container registry (ECR, Docker Hub, etc.).
+Local images are invisible to cluster nodes unless built inside the same runtime environment.
+
+❌ Service Not Routing Traffic (Selector Mismatch)
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Expose backend using a ClusterIP service and allow frontend to communicate with it.
+
+Error / Symptom:
+Pods were running successfully:
+
+kubectl get pods -n devops
+
+But application could not connect to backend.
+Service existed but traffic was not routed.
+
+Root Cause:
+Service selector did not match pod labels.
+
+Deployment label:
+labels:
+  app: backend
+
+Service selector mistakenly configured as:
+selector:
+  app: backend-wrong
+
+Because of this mismatch, the service had no endpoints.
+
+How I Debugged:
+Checked services:
+kubectl get svc -n devops
+
+Checked endpoints:
+kubectl get endpoints -n devops
+
+Observed:
+backend   <none>
+
+Which means service is not attached to any pods.
+
+Verified pod labels:
+kubectl get pods --show-labels -n devops
+
+Compared with service selector.
+
+Final Fix:
+Corrected service selector:
+selector:
+  app: backend
+
+Re-applied:
+kubectl apply -f backend-service.yaml
+
+Checked endpoints again:
+kubectl get endpoints -n devops
+
+Now endpoints showed pod IP.
+Application started working.
+
+Production Lesson:
+In Kubernetes, services route traffic using labels — not names.
+A label mismatch causes silent traffic failure even if pods are healthy.
+Always verify selectors and endpoints during service-related issues.
+
+🧠 How To Access Application Running in Pod
+There are multiple ways depending on service type.
+
+🔹 1️⃣ Access Using NodePort (Frontend Service)
+
+If frontend service type is:
+type: NodePort
+
+Find service:
+kubectl get svc -n devops
+
+Example output:
+frontend   NodePort   10.96.x.x   <none>   80:31245/TCP
+
+Access using Minikube:
+minikube service frontend -n devops
+
+OR manually:
+http://<minikube-ip>:<nodeport>
+
+Get IP:
+minikube ip
+
+🔹 2️⃣ Port Forward (Direct Pod Access)
+For debugging backend:
+kubectl port-forward pod/<pod-name> 8000:8000 -n devops
+
+Now access locally:
+http://localhost:8000/health
+
+This bypasses service completely.
+Very useful for debugging.
+
+🔹 3️⃣ Exec Into Pod
+kubectl exec -it <pod-name> -n devops -- sh
+
+Then test internally:
+curl localhost:8000/health
+
+Useful when debugging internal connectivity.
+
+🔹 4️⃣ Test Service From Inside Cluster
+
+Launch temporary pod:
+kubectl run test --rm -it --image=busybox -n devops -- sh
+
+Inside:
+wget -qO- http://backend:8000/health
+
+This tests service DNS inside cluster.
+
+🚀 Production Debug Command Summary
+Purpose	Command
+See pods	kubectl get pods -n devops
+Pod details	kubectl describe pod <pod> -n devops
+Pod logs	kubectl logs <pod> -n devops
+See services	kubectl get svc -n devops
+Check endpoints	kubectl get endpoints -n devops
+Show labels	kubectl get pods --show-labels -n devops
+Port forward	kubectl port-forward pod/<pod> 8000:8000 -n devops
+Exec inside pod	kubectl exec -it <pod> -n devops -- sh
+
+
+❌ CrashLoopBackOff Due to Invalid Container Command
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Deploy backend container to Kubernetes cluster.
+Error / Symptom:
+Pod status showed:
+CrashLoopBackOff
+
+Root Cause:
+Container command overridden in deployment YAML with invalid Python file:
+command: ["python", "wrongfile.py"]
+
+Container exited immediately with error code 2.
+Kubernetes restarted container repeatedly, resulting in CrashLoopBackOff.
+
+How I Debugged:
+Checked pod:
+kubectl get pods -n devops
+
+Described pod:
+kubectl describe pod <pod-name> -n devops
+
+Checked logs:
+kubectl logs <pod-name> -n devops
+
+Checked previous logs:
+kubectl logs <pod-name> -n devops --previous
+
+Observed Python file not found error.
+
+Final Fix:
+Removed incorrect command override from deployment YAML and reapplied.
+
+Production Lesson:
+CrashLoopBackOff usually means application inside container is failing immediately.
+Always check container logs before assuming infrastructure issue.
+
+
+❌ Readiness Probe Failure
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Ensure backend is ready before receiving traffic.
+
+Error / Symptom:
+Pod status:
+Running 0/1
+
+Service endpoints empty.
+
+Root Cause:
+Readiness probe path incorrect (/wrong-health).
+Probe returned 404.
+
+How I Debugged:
+kubectl get pods -n devops
+kubectl describe pod <pod-name> -n devops
+kubectl get endpoints -n devops
+
+Observed readiness probe failed in events.
+
+Final Fix:
+Corrected probe path to /health.
+
+Production Lesson:
+If readiness fails, traffic stops even if container is running.
+This can cause partial outages without obvious crashes.
+
+❌ Liveness Probe Causing Pod Restarts
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Ensure container restarts if unhealthy.
+
+Error / Symptom:
+Pod continuously restarting.
+Eventually CrashLoopBackOff.
+
+Root Cause:
+Liveness probe path incorrect.
+Probe failure caused Kubernetes to kill container repeatedly.
+
+How I Debugged:
+kubectl describe pod <pod-name> -n devops
+kubectl get pods -n devops -w
+
+Observed repeated liveness probe failures.
+
+Final Fix:
+Corrected liveness probe path to /health.
+
+Production Lesson:
+Liveness probes can cause cascading failures if misconfigured.
+Never configure aggressive probes without testing.
+
+
+❌ OOMKilled Due to Low Memory Limit
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Configure memory limits for backend container.
+
+Error / Symptom:
+Pod restarted automatically.
+kubectl describe pod showed:
+
+Reason: OOMKilled
+
+Root Cause:
+Memory limit set to 64Mi.
+Application consumed more memory during /memory-spike endpoint call.
+Kernel OOM killer terminated container.
+
+How I Debugged:
+kubectl get pods -n devops
+kubectl describe pod <pod-name> -n devops
+kubectl get pods -n devops -w
+
+Observed OOMKilled in Last State.
+
+Final Fix:
+Increased memory limit to 256Mi.
+
+Production Lesson:
+Setting aggressive memory limits can cause unexpected restarts under load.
+Always load-test before setting strict limits.
+Requests and limits must reflect real usage patterns.
+
+❌ ConfigMap Not Found (CreateContainerConfigError)
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Inject environment variables using ConfigMap.
+
+Error / Symptom:
+Pod stuck in:
+CreateContainerConfigError
+
+Root Cause:
+Deployment referenced non-existent ConfigMap.
+
+How I Debugged:
+kubectl get pods -n devops
+kubectl describe pod <pod-name> -n devops
+
+Observed error in Events section.
+
+Final Fix:
+Corrected ConfigMap name and reapplied deployment.
+
+Production Lesson:
+Configuration mismatches can prevent pods from starting.
+Always verify existence of referenced resources.
+
+❌ Secret Missing (CreateContainerConfigError)
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Inject sensitive values via Secret.
+
+Error / Symptom:
+Pod failed to start with:
+secret "backend-secret" not found
+
+Root Cause:
+Secret was deleted but still referenced in deployment.
+
+How I Debugged:
+kubectl describe pod <pod-name> -n devops
+
+Checked events for missing secret.
+
+Final Fix:
+Recreated Secret resource.
+
+Production Lesson:
+Secrets are critical dependencies.
+Missing secrets can cause full service outage.
+Secret management must be handled carefully in CI/CD.
+
+
+❌ Ingress 502 Bad Gateway (Wrong Service Name)
+Tool: Kubernetes Ingress
+
+What I Was Trying To Do:
+Route traffic to frontend service using Ingress.
+
+Error / Symptom:
+Browser showed:
+
+502 Bad Gateway
+
+Root Cause:
+Ingress referenced non-existent service name.
+
+How I Debugged:
+kubectl describe ingress devops-ingress -n devops
+kubectl get svc -n devops
+kubectl logs <ingress-controller-pod> -n ingress-nginx
+
+Observed service not found.
+
+Final Fix:
+Corrected service name in ingress.yaml.
+
+Production Lesson:
+Ingress errors often appear as 502.
+Always verify service name and port mapping.
+
+❌ Ingress Port Mismatch
+Tool: Kubernetes Ingress
+
+What I Was Trying To Do:
+Expose frontend via Ingress.
+
+Error / Symptom:
+502 error despite service existing.
+
+Root Cause:
+Ingress pointed to incorrect service port (9999).
+
+How I Debugged:
+kubectl describe ingress devops-ingress -n devops
+kubectl get svc -n devops
+
+Compared service port with ingress backend port.
+
+Final Fix:
+Updated ingress backend port to correct service port (80).
+
+Production Lesson:
+Ingress must reference service port — not container port.
+Port mismatches are a common routing failure.
