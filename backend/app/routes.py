@@ -9,3 +9,11 @@ def health_check():
 @router.get("/api/message")
 def get_message():
     return {"message": "Hello from FastAPI backend"}
+
+@router.get("/memory-spike")
+def memory_spike():
+    data = []
+    for i in range(10**7):
+        data.append("consume-memory")
+    return {"status": "memory consumed"}
+
