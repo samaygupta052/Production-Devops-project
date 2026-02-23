@@ -662,3 +662,112 @@ Updated ingress backend port to correct service port (80).
 Production Lesson:
 Ingress must reference service port — not container port.
 Port mismatches are a common routing failure.
+
+
+❌ HPA Not Scaling (Missing CPU Request)
+Tool: Kubernetes HPA
+
+What I Was Trying To Do:
+Auto-scale backend deployment based on CPU usage.
+
+Error / Symptom:
+HPA showed no scaling activity.
+kubectl describe hpa showed CPU utilization error.
+
+Root Cause:
+Deployment missing CPU request.
+HPA calculates utilization as percentage of CPU request.
+
+How I Debugged:
+kubectl describe hpa backend-hpa -n devops
+kubectl get deployment backend -n devops -o yaml
+
+Observed missing cpu request in resources.
+
+Final Fix:
+Added CPU request to deployment.
+
+Production Lesson:
+HPA requires CPU requests to calculate scaling thresholds.
+Without it, scaling will not work.
+
+❌ HPA Metrics Showing Unknown
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Monitor HPA scaling.
+
+Error / Symptom:
+HPA showed CPU as <unknown>.
+
+Root Cause:
+metrics-server not running.
+
+How I Debugged:
+kubectl get pods -n kube-system
+kubectl get hpa -n devops
+
+Observed metrics-server missing.
+
+Final Fix:
+Enabled metrics-server.
+
+Production Lesson:
+Autoscaling depends on cluster metrics infrastructure.
+If metrics fail, scaling fails silently.
+
+
+❌ Blue-Green Deployment Traffic Switch Failure
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Switch traffic from blue to green deployment.
+
+Error / Symptom:
+After switching service selector to green, application failed.
+
+Root Cause:
+Green deployment used broken image.
+Service routed traffic only to failing pods.
+
+How I Debugged:
+kubectl get pods -n devops
+kubectl describe pod <green-pod> -n devops
+kubectl get endpoints -n devops
+
+Observed green pods failing.
+
+Final Fix:
+Switched service selector back to blue.
+
+Production Lesson:
+Blue-green allows instant rollback without redeployment.
+Traffic control via service selectors is poweriful but must be validated before switching.
+
+
+❌ Canary Deployment Causing Partial Failures
+Tool: Kubernetes
+
+What I Was Trying To Do:
+Release new backend version using canary deployment.
+
+Error / Symptom:
+Some API calls failed while others succeeded.
+
+Root Cause:
+Canary pods contained broken release.
+Service routed portion of traffic to failing pods.
+
+How I Debugged:
+kubectl get pods -n devops
+kubectl logs <canary-pod> -n devops
+kubectl get endpoints -n devops
+
+Identified failing canary pods.
+
+Final Fix:
+Scaled down canary deployment to 0 replicas.
+
+Production Lesson:
+Canary reduces blast radius but does not eliminate risk.
+Monitoring is critical before full rollout.
